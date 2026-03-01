@@ -30,8 +30,11 @@ const DEFAULT_SETTINGS: ClaudeTerminalSettings = {
 class ClaudeTerminalView extends ItemView {
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
+  private webglAddon: WebglAddon | null = null;
   private ptyProcess: IPty | null = null;
   private resizeObserver: ResizeObserver | null = null;
+  private themeObserver: MutationObserver | null = null;
+  private terminalContainer: HTMLElement | null = null;
   private plugin: ClaudeTerminalPlugin;
   private fitDebounceTimer: NodeJS.Timeout | null = null;
 
@@ -104,6 +107,7 @@ class ClaudeTerminalView extends ItemView {
   }
 
   private initializeTerminal(container: HTMLElement) {
+    this.terminalContainer = container;
     const theme = this.getObsidianTheme();
 
     this.terminal = new Terminal({
@@ -132,7 +136,8 @@ class ClaudeTerminalView extends ItemView {
 
     // Use WebGL renderer for better Unicode block character rendering
     try {
-      this.terminal.loadAddon(new WebglAddon());
+      this.webglAddon = new WebglAddon();
+      this.terminal.loadAddon(this.webglAddon);
     } catch (e) {
       console.warn("Claude Terminal: WebGL renderer not available, using canvas fallback", e);
     }
@@ -161,6 +166,24 @@ class ClaudeTerminalView extends ItemView {
       }, 50);
     });
     this.resizeObserver.observe(container);
+
+    // Watch for Obsidian theme changes (light/dark toggle)
+    this.themeObserver = new MutationObserver(() => {
+      this.updateTerminalTheme();
+    });
+    this.themeObserver.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  }
+
+  private updateTerminalTheme() {
+    if (!this.terminal || !this.terminalContainer) return;
+    const theme = this.getObsidianTheme();
+    this.terminal.options.theme = {
+      background: theme.background,
+      foreground: theme.foreground,
+      cursor: theme.cursor,
+      selectionBackground: theme.selectionBackground,
+    };
+    this.applyBackgroundFix(this.terminalContainer, theme.background);
   }
 
   private getPluginPath(): string {
@@ -229,10 +252,17 @@ class ClaudeTerminalView extends ItemView {
   private destroyTerminal() {
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.themeObserver?.disconnect();
+    this.themeObserver = null;
 
     if (this.ptyProcess) {
       this.ptyProcess.kill();
       this.ptyProcess = null;
+    }
+
+    if (this.webglAddon) {
+      try { this.webglAddon.dispose(); } catch { /* already disposed */ }
+      this.webglAddon = null;
     }
 
     if (this.terminal) {
@@ -241,6 +271,7 @@ class ClaudeTerminalView extends ItemView {
     }
 
     this.fitAddon = null;
+    this.terminalContainer = null;
   }
 
   private applyBackgroundFix(container: HTMLElement, bg: string) {
@@ -270,8 +301,11 @@ export default class ClaudeTerminalPlugin extends Plugin {
   private floatingContainer: HTMLElement | null = null;
   private floatingTerminal: Terminal | null = null;
   private floatingFitAddon: FitAddon | null = null;
+  private floatingWebglAddon: WebglAddon | null = null;
   private floatingPtyProcess: IPty | null = null;
   private floatingResizeObserver: ResizeObserver | null = null;
+  private floatingThemeObserver: MutationObserver | null = null;
+  private floatingContentEl: HTMLElement | null = null;
   private isFloatingVisible: boolean = false;
   private floatingFitDebounceTimer: NodeJS.Timeout | null = null;
 
@@ -444,13 +478,16 @@ export default class ClaudeTerminalPlugin extends Plugin {
   private setupFloatingResize(handle: HTMLElement) {
     let startX: number, startY: number;
     let startWidth: number, startHeight: number;
+    let startRight: number;
 
     const onMouseMove = (e: MouseEvent) => {
       if (!this.floatingContainer) return;
-      const deltaX = startX - e.clientX;
+      const deltaX = e.clientX - startX;
       const deltaY = e.clientY - startY;
       const newWidth = Math.min(Math.max(startWidth + deltaX, 300), window.innerWidth * 0.8);
       const newHeight = Math.min(Math.max(startHeight + deltaY, 200), window.innerHeight * 0.8);
+      // Keep left edge fixed by adjusting right offset
+      this.floatingContainer.style.right = `${Math.max(0, startRight - deltaX)}px`;
       this.floatingContainer.style.width = `${newWidth}px`;
       this.floatingContainer.style.height = `${newHeight}px`;
       this.settings.floatingWidth = newWidth;
@@ -474,6 +511,8 @@ export default class ClaudeTerminalPlugin extends Plugin {
       startY = e.clientY;
       startWidth = this.floatingContainer?.offsetWidth || 500;
       startHeight = this.floatingContainer?.offsetHeight || 350;
+      const rect = this.floatingContainer!.getBoundingClientRect();
+      startRight = window.innerWidth - rect.right;
       document.addEventListener("mousemove", onMouseMove);
       document.addEventListener("mouseup", onMouseUp);
       e.preventDefault();
@@ -494,6 +533,7 @@ export default class ClaudeTerminalPlugin extends Plugin {
     const content = this.floatingContainer?.querySelector(".claude-terminal-content");
     if (!content) return;
 
+    this.floatingContentEl = content as HTMLElement;
     const theme = this.getObsidianTheme();
 
     this.floatingTerminal = new Terminal({
@@ -520,7 +560,8 @@ export default class ClaudeTerminalPlugin extends Plugin {
     this.floatingTerminal.open(content as HTMLElement);
 
     try {
-      this.floatingTerminal.loadAddon(new WebglAddon());
+      this.floatingWebglAddon = new WebglAddon();
+      this.floatingTerminal.loadAddon(this.floatingWebglAddon);
     } catch (e) {
       console.warn("Claude Terminal: WebGL renderer not available, using canvas fallback", e);
     }
@@ -548,6 +589,24 @@ export default class ClaudeTerminalPlugin extends Plugin {
       }, 50);
     });
     this.floatingResizeObserver.observe(content);
+
+    // Watch for Obsidian theme changes (light/dark toggle)
+    this.floatingThemeObserver = new MutationObserver(() => {
+      this.updateFloatingTerminalTheme();
+    });
+    this.floatingThemeObserver.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  }
+
+  private updateFloatingTerminalTheme() {
+    if (!this.floatingTerminal || !this.floatingContentEl) return;
+    const theme = this.getObsidianTheme();
+    this.floatingTerminal.options.theme = {
+      background: theme.background,
+      foreground: theme.foreground,
+      cursor: theme.cursor,
+      selectionBackground: theme.selectionBackground,
+    };
+    this.applyFloatingBackgroundFix(this.floatingContentEl, theme.background);
   }
 
   private getPluginPath(): string {
@@ -626,10 +685,18 @@ export default class ClaudeTerminalPlugin extends Plugin {
   private destroyFloatingTerminal() {
     this.floatingResizeObserver?.disconnect();
     this.floatingResizeObserver = null;
+    this.floatingThemeObserver?.disconnect();
+    this.floatingThemeObserver = null;
+    this.floatingContentEl = null;
 
     if (this.floatingPtyProcess) {
       this.floatingPtyProcess.kill();
       this.floatingPtyProcess = null;
+    }
+
+    if (this.floatingWebglAddon) {
+      try { this.floatingWebglAddon.dispose(); } catch { /* already disposed */ }
+      this.floatingWebglAddon = null;
     }
 
     if (this.floatingTerminal) {
