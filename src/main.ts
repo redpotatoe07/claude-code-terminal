@@ -1,6 +1,7 @@
 import { App, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, ItemView, Menu, FileSystemAdapter, setIcon } from "obsidian";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
 import type { IPty } from "node-pty";
 import * as path from "path";
 
@@ -21,7 +22,7 @@ interface ClaudeTerminalSettings {
 const DEFAULT_SETTINGS: ClaudeTerminalSettings = {
   shellPath: process.platform === "win32" ? "powershell.exe" : process.env.SHELL || "/bin/zsh",
   autoLaunchClaude: true,
-  fontSize: 13,
+  fontSize: 14,
   floatingWidth: 500,
   floatingHeight: 350,
 };
@@ -107,16 +108,18 @@ class ClaudeTerminalView extends ItemView {
 
     this.terminal = new Terminal({
       fontSize: this.plugin.settings.fontSize,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", Menlo, monospace',
+      lineHeight: 1,
       theme: {
         background: theme.background,
         foreground: theme.foreground,
         cursor: theme.cursor,
         selectionBackground: theme.selectionBackground,
       },
+      convertEol: true,
       cursorBlink: true,
-      cursorStyle: "bar",
-      allowTransparency: true,
+      cursorStyle: "block",
+      allowTransparency: false,
       scrollback: 10000,
       cols: 80,
       rows: 24,
@@ -127,6 +130,13 @@ class ClaudeTerminalView extends ItemView {
 
     this.terminal.open(container);
 
+    // Use WebGL renderer for better Unicode block character rendering
+    try {
+      this.terminal.loadAddon(new WebglAddon());
+    } catch (e) {
+      console.warn("Claude Terminal: WebGL renderer not available, using canvas fallback", e);
+    }
+
     // Fit after DOM is ready
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -134,6 +144,7 @@ class ClaudeTerminalView extends ItemView {
           this.fitAddon.fit();
           this.startPty();
           this.terminal.focus();
+          this.applyBackgroundFix(container, theme.background);
         }
       });
     });
@@ -145,6 +156,7 @@ class ClaudeTerminalView extends ItemView {
         if (this.fitAddon && this.terminal && this.ptyProcess) {
           this.fitAddon.fit();
           this.terminal.scrollToBottom();
+          this.applyBackgroundFix(container, this.getObsidianTheme().background);
         }
       }, 50);
     });
@@ -154,7 +166,7 @@ class ClaudeTerminalView extends ItemView {
   private getPluginPath(): string {
     const adapter = this.app.vault.adapter as FileSystemAdapter;
     const basePath = adapter.getBasePath();
-    return path.join(basePath, this.app.vault.configDir, "plugins", "claude-terminal");
+    return path.join(basePath, this.app.vault.configDir, "plugins", "claude-code-terminal");
   }
 
   private startPty() {
@@ -173,7 +185,7 @@ class ClaudeTerminalView extends ItemView {
 
       const vaultPath = (this.app.vault.adapter as FileSystemAdapter).getBasePath();
 
-      this.ptyProcess = nodePty.spawn(this.plugin.settings.shellPath, [], {
+      const spawnOptions: Record<string, unknown> = {
         name: "xterm-256color",
         cols: this.terminal.cols,
         rows: this.terminal.rows,
@@ -183,7 +195,12 @@ class ClaudeTerminalView extends ItemView {
           TERM: "xterm-256color",
           COLORTERM: "truecolor",
         },
-      });
+      };
+      if (process.platform === "win32") {
+        spawnOptions.useConpty = true;
+      }
+
+      this.ptyProcess = nodePty.spawn(this.plugin.settings.shellPath, [], spawnOptions);
 
       this.ptyProcess!.onData((data: string) => {
         this.terminal?.write(data);
@@ -199,7 +216,7 @@ class ClaudeTerminalView extends ItemView {
 
       if (this.plugin.settings.autoLaunchClaude) {
         setTimeout(() => {
-          this.ptyProcess?.write("clear && claude\r");
+          this.ptyProcess?.write("claude\r");
         }, 300);
       }
     } catch (error) {
@@ -224,6 +241,19 @@ class ClaudeTerminalView extends ItemView {
     }
 
     this.fitAddon = null;
+  }
+
+  private applyBackgroundFix(container: HTMLElement, bg: string) {
+    // Use setProperty with 'important' to override any CSS !important rules
+    // and xterm.js internal inline styles
+    const targets = [
+      container,
+      container.querySelector('.xterm') as HTMLElement,
+      container.querySelector('.xterm-viewport') as HTMLElement,
+    ];
+    for (const el of targets) {
+      if (el) el.style.setProperty('background-color', bg, 'important');
+    }
   }
 
   clearTerminal() {
@@ -428,6 +458,8 @@ export default class ClaudeTerminalPlugin extends Plugin {
       if (this.floatingFitAddon && this.floatingTerminal) {
         this.floatingFitAddon.fit();
         this.floatingTerminal.scrollToBottom();
+        const fc = this.floatingContainer?.querySelector('.claude-terminal-content') as HTMLElement;
+        if (fc) this.applyFloatingBackgroundFix(fc, this.getObsidianTheme().background);
       }
     };
 
@@ -466,16 +498,18 @@ export default class ClaudeTerminalPlugin extends Plugin {
 
     this.floatingTerminal = new Terminal({
       fontSize: this.settings.fontSize,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", Menlo, monospace',
+      lineHeight: 1,
       theme: {
         background: theme.background,
         foreground: theme.foreground,
         cursor: theme.cursor,
         selectionBackground: theme.selectionBackground,
       },
+      convertEol: true,
       cursorBlink: true,
-      cursorStyle: "bar",
-      allowTransparency: true,
+      cursorStyle: "block",
+      allowTransparency: false,
       scrollback: 10000,
       cols: 80,
       rows: 24,
@@ -485,12 +519,19 @@ export default class ClaudeTerminalPlugin extends Plugin {
     this.floatingTerminal.loadAddon(this.floatingFitAddon);
     this.floatingTerminal.open(content as HTMLElement);
 
+    try {
+      this.floatingTerminal.loadAddon(new WebglAddon());
+    } catch (e) {
+      console.warn("Claude Terminal: WebGL renderer not available, using canvas fallback", e);
+    }
+
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         if (this.floatingFitAddon && this.floatingTerminal) {
           this.floatingFitAddon.fit();
           this.startFloatingPty();
           this.floatingTerminal.focus();
+          this.applyFloatingBackgroundFix(content as HTMLElement, theme.background);
         }
       });
     });
@@ -501,6 +542,8 @@ export default class ClaudeTerminalPlugin extends Plugin {
         if (this.floatingFitAddon && this.floatingTerminal && this.floatingPtyProcess) {
           this.floatingFitAddon.fit();
           this.floatingTerminal.scrollToBottom();
+          const fc = this.floatingContainer?.querySelector('.claude-terminal-content') as HTMLElement;
+          if (fc) this.applyFloatingBackgroundFix(fc, this.getObsidianTheme().background);
         }
       }, 50);
     });
@@ -510,7 +553,7 @@ export default class ClaudeTerminalPlugin extends Plugin {
   private getPluginPath(): string {
     const adapter = this.app.vault.adapter as FileSystemAdapter;
     const basePath = adapter.getBasePath();
-    return path.join(basePath, this.app.vault.configDir, "plugins", "claude-terminal");
+    return path.join(basePath, this.app.vault.configDir, "plugins", "claude-code-terminal");
   }
 
   private startFloatingPty() {
@@ -529,7 +572,7 @@ export default class ClaudeTerminalPlugin extends Plugin {
 
       const vaultPath = (this.app.vault.adapter as FileSystemAdapter).getBasePath();
 
-      this.floatingPtyProcess = nodePty.spawn(this.settings.shellPath, [], {
+      const spawnOptions: Record<string, unknown> = {
         name: "xterm-256color",
         cols: this.floatingTerminal.cols,
         rows: this.floatingTerminal.rows,
@@ -539,7 +582,12 @@ export default class ClaudeTerminalPlugin extends Plugin {
           TERM: "xterm-256color",
           COLORTERM: "truecolor",
         },
-      });
+      };
+      if (process.platform === "win32") {
+        spawnOptions.useConpty = true;
+      }
+
+      this.floatingPtyProcess = nodePty.spawn(this.settings.shellPath, [], spawnOptions);
 
       this.floatingPtyProcess!.onData((data: string) => {
         this.floatingTerminal?.write(data);
@@ -555,12 +603,23 @@ export default class ClaudeTerminalPlugin extends Plugin {
 
       if (this.settings.autoLaunchClaude) {
         setTimeout(() => {
-          this.floatingPtyProcess?.write("clear && claude\r");
+          this.floatingPtyProcess?.write("claude\r");
         }, 300);
       }
     } catch (error) {
       console.error("Claude Terminal: Failed to start PTY", error);
       this.floatingTerminal?.write("\r\n\x1b[31mError: Failed to start terminal.\x1b[0m\r\n");
+    }
+  }
+
+  private applyFloatingBackgroundFix(container: HTMLElement, bg: string) {
+    const targets = [
+      container,
+      container.querySelector('.xterm') as HTMLElement,
+      container.querySelector('.xterm-viewport') as HTMLElement,
+    ];
+    for (const el of targets) {
+      if (el) el.style.setProperty('background-color', bg, 'important');
     }
   }
 

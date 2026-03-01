@@ -48,7 +48,7 @@
 }
 
 .xterm .xterm-viewport {
-    background-color: #000;
+    background-color: inherit;
     overflow-y: scroll;
     cursor: default;
     position: absolute;
@@ -246,9 +246,11 @@
 
 .claude-terminal-content {
   flex: 1;
-  overflow: hidden;
+  overflow: clip;
   min-height: 0;
+  min-width: 0;
   position: relative;
+  background-color: var(--background-primary);
 }
 
 .claude-terminal-content .xterm {
@@ -256,8 +258,22 @@
   width: 100%;
 }
 
-.claude-terminal-content .xterm-viewport {
-  background-color: var(--background-primary) !important;
+/* Prevent Obsidian from overriding xterm's hidden textarea */
+.claude-terminal-content .xterm-helper-textarea {
+  opacity: 0 !important;
+  position: absolute !important;
+  left: -9999em !important;
+  width: 0 !important;
+  height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  margin: 0 !important;
+  font-size: 1px !important;
+  color: transparent !important;
+  background: transparent !important;
+  caret-color: transparent !important;
+  outline: none !important;
+  resize: none !important;
 }
 
 /* Resize handle in bottom-left corner */
@@ -286,10 +302,7 @@
   border-color: var(--text-muted);
 }
 
-/* Xterm styling for Obsidian theme */
-.claude-terminal-floating .xterm-rows {
-  font-family: var(--font-monospace), Menlo, Monaco, "Courier New", monospace;
-}
+/* Let Terminal config control the font — don't override from CSS */
 
 /* Native sidebar view styling */
 .claude-terminal-view-container {
@@ -302,7 +315,8 @@
 .claude-terminal-view-container .claude-terminal-content {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  min-width: 0;
+  overflow: clip;
 }
 
 .claude-terminal-view-container .xterm {
@@ -310,6 +324,3 @@
   width: 100%;
 }
 
-.claude-terminal-view-container .xterm-viewport {
-  background-color: var(--background-primary) !important;
-}
