@@ -33,3 +33,7 @@ yarn-error.log*
 # Environment
 .env
 .env.local
+
+# Local rebuild helpers
+rebuild.bat
+rebuild.js
