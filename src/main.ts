@@ -134,6 +134,21 @@ class ClaudeTerminalView extends ItemView {
 
     this.terminal.open(container);
 
+    // Handle paste from voice dictation tools (e.g. Wispr Flow) that simulate Ctrl+V.
+    // Simulated keydowns don't trigger real paste events, so we manually read the clipboard.
+    const textarea = container.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement;
+    if (textarea) {
+      textarea.addEventListener('keydown', (e: KeyboardEvent) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+          navigator.clipboard.readText().then((text) => {
+            if (text && this.ptyProcess) {
+              this.ptyProcess.write(text);
+            }
+          }).catch(() => { /* clipboard access denied */ });
+        }
+      }, true);
+    }
+
     // Use WebGL renderer for better Unicode block character rendering
     try {
       this.webglAddon = new WebglAddon();
@@ -558,6 +573,20 @@ export default class ClaudeTerminalPlugin extends Plugin {
     this.floatingFitAddon = new FitAddon();
     this.floatingTerminal.loadAddon(this.floatingFitAddon);
     this.floatingTerminal.open(content as HTMLElement);
+
+    // Handle paste from voice dictation tools (e.g. Wispr Flow)
+    const floatingTextarea = content.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement;
+    if (floatingTextarea) {
+      floatingTextarea.addEventListener('keydown', (e: KeyboardEvent) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+          navigator.clipboard.readText().then((text) => {
+            if (text && this.floatingPtyProcess) {
+              this.floatingPtyProcess.write(text);
+            }
+          }).catch(() => { /* clipboard access denied */ });
+        }
+      }, true);
+    }
 
     try {
       this.floatingWebglAddon = new WebglAddon();
